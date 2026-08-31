@@ -22,6 +22,8 @@ public sealed class ConPtySession : IDisposable
 
     private const uint EXTENDED_STARTUPINFO_PRESENT = 0x00080000;
 
+    private const uint CREATE_UNICODE_ENVIRONMENT = 0x00000400;
+
     private const int PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE = 0x00020016;
 
 
@@ -86,7 +88,7 @@ public sealed class ConPtySession : IDisposable
 
 
 
-    public void Start(string commandLine, string? workingDirectory = null)
+    public void Start(string commandLine, string? workingDirectory = null, IReadOnlyDictionary<string, string>? environment = null)
 
     {
 
@@ -140,6 +142,10 @@ public sealed class ConPtySession : IDisposable
 
 
 
+        var environmentBlock = BuildEnvironmentBlock(environment);
+
+
+
         var success = CreateProcess(
 
             null,
@@ -152,9 +158,9 @@ public sealed class ConPtySession : IDisposable
 
             false,
 
-            EXTENDED_STARTUPINFO_PRESENT,
+            EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT,
 
-            IntPtr.Zero,
+            environmentBlock,
 
             workingDirectory,
 
@@ -164,9 +170,75 @@ public sealed class ConPtySession : IDisposable
 
 
 
+        Marshal.FreeHGlobal(environmentBlock);
+
+
+
         if (!success)
 
             throw new Win32Exception(Marshal.GetLastWin32Error());
+
+    }
+
+
+
+    private static IntPtr BuildEnvironmentBlock(
+
+        IReadOnlyDictionary<string, string>? overrides)
+
+    {
+
+        var variables = new Dictionary<string, string>(
+
+            StringComparer.OrdinalIgnoreCase);
+
+
+
+        foreach (var key in Environment.GetEnvironmentVariables().Keys)
+
+        {
+
+            if (key is string name &&
+
+                Environment.GetEnvironmentVariable(name) is { } value)
+
+            {
+
+                variables[name] = value;
+
+            }
+
+        }
+
+
+
+        if (overrides is not null)
+
+        {
+
+            foreach (var pair in overrides)
+
+            {
+
+                variables[pair.Key] = pair.Value;
+
+            }
+
+        }
+
+
+
+        var block = string.Concat(
+
+            variables.Select(pair => $"{pair.Key}={pair.Value}\0")) + "\0";
+
+        var bytes = Encoding.Unicode.GetBytes(block);
+
+        var pointer = Marshal.AllocHGlobal(bytes.Length);
+
+        Marshal.Copy(bytes, 0, pointer, bytes.Length);
+
+        return pointer;
 
     }
 

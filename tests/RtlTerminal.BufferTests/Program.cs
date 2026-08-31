@@ -10,6 +10,8 @@ var tests = new (string Name, Action Run)[]
     ("OpenTUI capability handshake does not leak", OpenTuiHandshakeDoesNotLeak),
     ("modern TUI modes are tracked", ModernTuiModesAreTracked),
     ("emoji grapheme clusters keep terminal width", EmojiClustersKeepWidth),
+    ("box drawing characters stay left-to-right", BoxDrawingCharactersStayLeftToRight),
+    ("buffer dimensions track resize", BufferDimensionsTrackResize),
     ("Persian text remains detectable for Smart RTL", PersianTextRemainsSmartRtl)
 };
 
@@ -160,6 +162,38 @@ static void EmojiClustersKeepWidth()
         $"emoji clusters plus cursor occupied {line.CellLength} cells instead of 6");
     Assert(string.Concat(line.Runs.Select(run => run.Text)) == "👨‍💻🇮🇷X ",
         "emoji cluster text was split or lost");
+}
+
+static void BoxDrawingCharactersStayLeftToRight()
+{
+    // Regression: banner/TUI box borders next to Persian text used to be
+    // treated as neutrals, folded into RTL spans and visually reordered.
+    var text = "│ پشتیبانی کامل از زبان فارسی │";
+    var spans = SmartRtl.GetDirectionalSpans(text, baseRightToLeft: true);
+
+    var index = 0;
+    foreach (var span in spans)
+    {
+        for (var offset = 0; offset < span.Length; offset++)
+        {
+            if (text[index + offset] == '│')
+                Assert(!span.IsRightToLeft,
+                    "box drawing character was folded into an RTL span");
+        }
+
+        index += span.Length;
+    }
+}
+
+static void BufferDimensionsTrackResize()
+{
+    var buffer = new TerminalBuffer(80, 24);
+    Assert(buffer.Columns == 80 && buffer.Rows == 24,
+        $"initial dimensions were {buffer.Columns}x{buffer.Rows}");
+
+    buffer.Resize(120, 30);
+    Assert(buffer.Columns == 120 && buffer.Rows == 30,
+        $"resize left dimensions at {buffer.Columns}x{buffer.Rows}");
 }
 
 static void PersianTextRemainsSmartRtl()

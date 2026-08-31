@@ -426,7 +426,7 @@
                      Foreground="#e6e6e6"
                      BorderThickness="0"
                      Padding="10"
-                     FontFamily="Cascadia Mono, Consolas"
+                     FontFamily="Cascadia Mono, Consolas, Segoe UI Emoji, Segoe UI Symbol, Segoe UI Historic"
                      FontSize="15"
                      HorizontalScrollBarVisibility="Disabled"
                      VerticalScrollBarVisibility="Auto"

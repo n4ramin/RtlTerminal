@@ -124,6 +124,10 @@ public sealed class TerminalBuffer
         ClearAll();
     }
 
+    public int Columns => _columns;
+
+    public int Rows => _rows;
+
     public TerminalSnapshot SetMaximumScrollbackRows(int maximumRows)
     {
         lock (_syncRoot)

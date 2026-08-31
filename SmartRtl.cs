@@ -97,6 +97,9 @@ internal static class SmartRtl
 
     private static int GetStrongDirection(Rune rune)
     {
+        if (IsForcedLeftToRightCharacter(rune))
+            return 0;
+
         if (IsStrongRtlLetter(rune))
             return 1;
 
@@ -235,6 +238,20 @@ internal static class SmartRtl
                 directions[neutralIndex] = resolvedDirection;
             }
         }
+    }
+
+    private static bool IsForcedLeftToRightCharacter(Rune rune)
+    {
+        var value = rune.Value;
+
+        // Terminal graphics characters must never be treated as neutrals.
+        // When they sit next to RTL text, the neutral resolution would fold
+        // them into RTL spans and WPF would visually reorder them, breaking
+        // ASCII/UTF-8 boxes, borders, spinners and progress bars.
+        return value is >= 0x2190 and <= 0x21ff      // Arrows
+            or >= 0x2500 and <= 0x259f               // Box Drawing + Block Elements
+            or >= 0x25a0 and <= 0x25ff               // Geometric Shapes
+            or >= 0x2800 and <= 0x28ff;              // Braille Patterns (spinners)
     }
 
     private static bool IsStrongRtlLetter(Rune rune)

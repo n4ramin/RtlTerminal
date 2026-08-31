@@ -45,6 +45,7 @@ public partial class MainWindow : Window
     private TerminalSnapshot? _lastRenderedSnapshot;
     private FlowDocument? _terminalDocument;
     private double _cellWidth = 8.5;
+    private string _baseFontFamilySource = "Cascadia Mono, Consolas";
     private double _lineHeight = 18;
     private bool _followOutput = true;
     private bool _restoringScrollPosition;
@@ -114,7 +115,13 @@ public partial class MainWindow : Window
             _session = new ConPtySession(columns, rows);
             _session.Start(
                 GetProfileCommand(profile),
-                startupDirectory);
+                startupDirectory,
+                new Dictionary<string, string>
+                {
+                    ["TERM"] = "xterm-256color",
+                    ["COLORTERM"] = "truecolor",
+                    ["TERM_PROGRAM"] = "RtlTerminal"
+                });
 
             if (profile == TerminalProfile.CommandPrompt &&
                 startupDirectory is not null)
@@ -123,6 +130,7 @@ public partial class MainWindow : Window
             }
 
             SaveActiveTabState();
+            SynchronizeSessionSize();
             _ = Task.Run(() => ReadOutputLoop(tab));
         }
         catch (Exception exception)
@@ -164,6 +172,42 @@ public partial class MainWindow : Window
         var rows = GetRows();
         _session.Resize(columns, rows);
         QueueRender(_terminalBuffer.Resize(columns, rows));
+    }
+
+    /// <summary>
+    /// Re-aligns the ConPTY size with the current rendered grid. Layout is
+    /// asynchronous in WPF, so the window size can change (or a tab can be
+    /// re-activated) without Window_SizeChanged firing afterwards. Without
+    /// this sync, TUI applications keep rendering for a stale column count
+    /// and their output lands in the wrong columns.
+    /// </summary>
+    private void SynchronizeSessionSize()
+    {
+        if (_session is null || _terminalBuffer is null)
+            return;
+
+        var columns = GetColumns();
+        var rows = GetRows();
+
+        if (columns == _terminalBuffer.Columns &&
+            rows == _terminalBuffer.Rows)
+        {
+            return;
+        }
+
+        try
+        {
+            _session.Resize(columns, rows);
+            QueueRender(_terminalBuffer.Resize(columns, rows));
+        }
+        catch (ObjectDisposedException)
+        {
+            // The session closed while the tab was being switched.
+        }
+        catch (IOException)
+        {
+            // The ConPTY pipe is gone; the read loop will surface the exit.
+        }
     }
 
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
@@ -569,7 +613,7 @@ public partial class MainWindow : Window
     private void FontSettingsMenuItem_Click(object sender, RoutedEventArgs e)
     {
         var settingsWindow = new FontSettingsWindow(
-            TerminalTextBox.FontFamily.Source,
+            _baseFontFamilySource,
             TerminalTextBox.FontSize,
             TerminalTextBox.FontWeight,
             TerminalTextBox.FontStyle,
@@ -1013,6 +1057,7 @@ public partial class MainWindow : Window
         _activeTab = tab;
         LoadTabState(tab);
         RebuildTabStrip();
+        SynchronizeSessionSize();
 
         if (_pendingSnapshot is not null)
             StartRenderTimer();
@@ -1651,6 +1696,14 @@ public partial class MainWindow : Window
             _renderedScrollbackStartIndex = snapshot.ScrollbackStartIndex;
         }
 
+        // Lock the document page width to the terminal grid so WPF never
+        // re-wraps lines that the buffer already wrapped at the exact column
+        // count. Re-flowing TUI screens (alternate screen) breaks box
+        // drawing, centered logos and cursor-relative layouts.
+        var pageWidth = (GetColumns() * _cellWidth) + (_cellWidth / 2);
+        if (_terminalDocument.PageWidth != pageWidth)
+            _terminalDocument.PageWidth = pageWidth;
+
         if (snapshot.ScrollbackStartIndex <
             _renderedScrollbackStartIndex)
         {
@@ -1703,6 +1756,7 @@ public partial class MainWindow : Window
             var containsRightToLeft =
                 smartRtlEnabled && SmartRtl.IsRightToLeft(line);
             var preserveTerminalGrid = snapshot.Modes.AlternateScreen;
+            var applyBidiSpans = containsRightToLeft && !preserveTerminalGrid;
             var isRightToLeft = SmartRtl.ShouldRightAlign(
                 line,
                 smartRtlEnabled,
@@ -1715,7 +1769,7 @@ public partial class MainWindow : Window
             var key = CreateLineKey(
                 line,
                 isRightToLeft,
-                containsRightToLeft,
+                applyBidiSpans,
                 cursorColumn);
 
             if (row < _renderedLines.Count &&
@@ -1742,7 +1796,7 @@ public partial class MainWindow : Window
             var renderSegments = CreateRenderSegments(line, cursorColumn);
             var lineText = string.Concat(
                 renderSegments.Select(segment => segment.Text));
-            IReadOnlyList<DirectionalSpan> directionalSpans = containsRightToLeft
+            IReadOnlyList<DirectionalSpan> directionalSpans = applyBidiSpans
                 ? SmartRtl.GetDirectionalSpans(lineText, isRightToLeft)
                 : string.IsNullOrEmpty(lineText)
                     ? []
@@ -1910,7 +1964,9 @@ public partial class MainWindow : Window
 
     private void ApplyFontSettings(TerminalFontSettings settings)
     {
-        TerminalTextBox.FontFamily = new FontFamily(settings.Family);
+        _baseFontFamilySource = settings.Family;
+        TerminalTextBox.FontFamily =
+            TerminalFontFallback.CreateFamily(settings.Family);
         TerminalTextBox.FontSize = settings.Size;
         TerminalTextBox.FontWeight = settings.Bold
             ? FontWeights.Bold

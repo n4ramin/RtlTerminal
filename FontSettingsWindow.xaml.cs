@@ -140,7 +140,8 @@ public partial class FontSettingsWindow : Window
             return;
 
         var family = GetSelectedFamily();
-        PreviewTextBlock.FontFamily = new FontFamily(family);
+        PreviewTextBlock.FontFamily =
+            TerminalFontFallback.CreateFamily(family);
         PreviewTextBlock.FontSize = GetFontSize();
         PreviewTextBlock.FontWeight =
             BoldCheckBox.IsChecked == true
