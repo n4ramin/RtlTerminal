@@ -429,6 +429,23 @@ public partial class MainWindow : Window
         _followOutput =
             e.ExtentHeight <= e.ViewportHeight ||
             e.VerticalOffset >= e.ExtentHeight - e.ViewportHeight - 2;
+
+        // Snap scrolling to whole text rows: fractional offsets land rows
+        // on different sub-pixel positions, which looks like the characters
+        // jump sideways while scrolling.
+        if (sender is ScrollViewer scrollViewer &&
+            _lineHeight > 1)
+        {
+            var snapped = Math.Round(
+                scrollViewer.VerticalOffset / _lineHeight) * _lineHeight;
+
+            if (Math.Abs(snapped - scrollViewer.VerticalOffset) > 0.5 &&
+                snapped >= 0 &&
+                snapped <= scrollViewer.ScrollableHeight + 0.01)
+            {
+                scrollViewer.ScrollToVerticalOffset(snapped);
+            }
+        }
     }
 
     private void TerminalTextBox_PreviewMouseRightButtonDown(
@@ -1930,6 +1947,8 @@ public partial class MainWindow : Window
             var cursorLine = _renderedLines[cursorRow];
             TerminalTextBox.CaretPosition =
                 FindCaretPosition(cursorLine, snapshot.CursorColumn);
+            FindVisualChild<ScrollViewer>(TerminalTextBox)?
+                .ScrollToHorizontalOffset(0);
         }
 
         _renderedColumns = GetColumns();
@@ -1982,6 +2001,13 @@ public partial class MainWindow : Window
                         FindVisualChild<ScrollViewer>(TerminalTextBox)?
                             .ScrollToVerticalOffset(verticalOffset);
                     }
+
+                    // Caret placement and content updates can silently
+                    // scroll the view sideways when a line is a hair wider
+                    // than the viewport; the terminal grid must stay flush
+                    // left.
+                    FindVisualChild<ScrollViewer>(TerminalTextBox)?
+                        .ScrollToHorizontalOffset(0);
                 }
                 finally
                 {
