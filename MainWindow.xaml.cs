@@ -54,6 +54,9 @@ public partial class MainWindow : Window
     private int _renderedScrollbackCount;
     private long _renderedScrollbackStartIndex;
     private bool _renderedSmartRtlEnabled = true;
+    private bool _renderedAlternateScreen;
+    private int _renderedColumns;
+    private int _renderedRows;
     private TerminalProfile _defaultProfile = TerminalProfile.CommandPrompt;
     private int _historySize = 2000;
     private bool _updateCheckInProgress;
@@ -83,6 +86,9 @@ public partial class MainWindow : Window
         Dispatcher.BeginInvoke(
             DispatcherPriority.Loaded,
             () => CreateTerminalTab(_defaultProfile));
+        Dispatcher.BeginInvoke(
+            DispatcherPriority.Background,
+            SynchronizeSessionSize);
         _ = CheckForUpdatesOnStartupAsync();
     }
 
@@ -1030,6 +1036,8 @@ public partial class MainWindow : Window
         _renderedScrollbackCount = tab.RenderedScrollbackCount;
         _renderedScrollbackStartIndex = tab.RenderedScrollbackStartIndex;
         _renderedSmartRtlEnabled = tab.RenderedSmartRtlEnabled;
+        _renderedAlternateScreen =
+            tab.LastRenderedSnapshot?.Modes.AlternateScreen ?? false;
         _followOutput = tab.FollowOutput;
         _renderedLines.Clear();
         _renderedLines.AddRange(tab.RenderedLines);
@@ -1700,9 +1708,22 @@ public partial class MainWindow : Window
         // re-wraps lines that the buffer already wrapped at the exact column
         // count. Re-flowing TUI screens (alternate screen) breaks box
         // drawing, centered logos and cursor-relative layouts.
-        var pageWidth = (GetColumns() * _cellWidth) + (_cellWidth / 2);
+        var pageWidth = (GetColumns() * _cellWidth) + (_cellWidth * 2);
         if (_terminalDocument.PageWidth != pageWidth)
             _terminalDocument.PageWidth = pageWidth;
+
+        var alternateScreen = snapshot.Modes.AlternateScreen;
+        var fullRedraw = alternateScreen != _renderedAlternateScreen;
+        if (fullRedraw)
+        {
+            // Entering or leaving a TUI screen changes the row model
+            // (fixed grid vs. scrollback). Stale paragraphs would keep
+            // rendering on top of the new frame, so start from scratch.
+            _renderedAlternateScreen = alternateScreen;
+            _terminalDocument.Blocks.Clear();
+            _renderedLines.Clear();
+            _renderedScrollbackCount = 0;
+        }
 
         if (snapshot.ScrollbackStartIndex <
             _renderedScrollbackStartIndex)
@@ -1740,7 +1761,7 @@ public partial class MainWindow : Window
         }
 
         var firstRowToRender =
-            _renderedSmartRtlEnabled == smartRtlEnabled
+            !fullRedraw && _renderedSmartRtlEnabled == smartRtlEnabled
                 ? Math.Min(
                     Math.Min(
                         _renderedScrollbackCount,
@@ -1908,6 +1929,20 @@ public partial class MainWindow : Window
             var cursorLine = _renderedLines[cursorRow];
             TerminalTextBox.CaretPosition =
                 FindCaretPosition(cursorLine, snapshot.CursorColumn);
+        }
+
+        _renderedColumns = GetColumns();
+        _renderedRows = GetRows();
+
+        // Self-heal: if the rendered grid drifted from the buffer grid
+        // (late WPF layout, window resize during startup, scrollbar
+        // toggles), re-align ConPTY and the buffer. Small differences are
+        // ignored to avoid resize oscillation from scrollbar toggling.
+        if (_terminalBuffer is not null &&
+            (Math.Abs(_renderedColumns - _terminalBuffer.Columns) >= 4 ||
+                Math.Abs(_renderedRows - _terminalBuffer.Rows) >= 2))
+        {
+            SynchronizeSessionSize();
         }
 
         ScheduleScrollRestore(
