@@ -1681,6 +1681,7 @@ public partial class MainWindow : Window
         TerminalTextBox.IsReadOnlyCaretVisible = false;
         var smartRtlEnabled = SmartRtlMenuItem.IsChecked;
         var scrollViewer = FindVisualChild<ScrollViewer>(TerminalTextBox);
+        scrollViewer?.ScrollToHorizontalOffset(0);
         var verticalOffset = scrollViewer?.VerticalOffset ?? 0;
         var shouldFollowOutput = _followOutput;
 
@@ -1708,7 +1709,7 @@ public partial class MainWindow : Window
         // re-wraps lines that the buffer already wrapped at the exact column
         // count. Re-flowing TUI screens (alternate screen) breaks box
         // drawing, centered logos and cursor-relative layouts.
-        var pageWidth = (GetColumns() * _cellWidth) + (_cellWidth * 2);
+        var pageWidth = (GetColumns() * _cellWidth) + 0.5;
         if (_terminalDocument.PageWidth != pageWidth)
             _terminalDocument.PageWidth = pageWidth;
 
